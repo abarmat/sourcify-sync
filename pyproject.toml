@@ -1,0 +1,12 @@
+[project]
+name = "sourcify-sync"
+version = "0.1.0"
+description = "Download files from Sourcify export manifest using aria2c"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "httpx>=0.27.0",
+]
+
+[project.scripts]
+sourcify-sync = "main:main"

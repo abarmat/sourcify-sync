@@ -1,0 +1,13 @@
+# Sourcify Sync Configuration
+
+# URL to the manifest file
+manifest_url = "https://export.sourcify.dev/manifest.json"
+
+# Directory where files will be downloaded (flattened)
+download_dir = "./downloads"
+
+# Path to aria2c binary
+aria2c_path = "aria2c"
+
+# Number of concurrent downloads
+concurrent_downloads = 5
