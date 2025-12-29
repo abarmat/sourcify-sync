@@ -1,14 +1,11 @@
 """aria2c-based downloader for sourcify-sync with robust resume support."""
 
-import asyncio
 import os
 import subprocess
 import tempfile
 from dataclasses import dataclass
 from collections.abc import Callable
 from pathlib import Path
-
-import httpx
 
 from config import Config
 
@@ -21,89 +18,45 @@ class DownloadResult:
     aria2c_exit_code: int
 
 
-async def check_file_needs_download(
-    client: httpx.AsyncClient,
-    url: str,
-    local_path: Path,
-    semaphore: asyncio.Semaphore,
-) -> bool:
-    """Check if a file needs to be downloaded.
-
-    Returns True if file is missing or size doesn't match remote.
-    """
-    if not local_path.exists():
-        return True
-
-    local_size = local_path.stat().st_size
-
-    async with semaphore:
-        try:
-            response = await client.head(url, follow_redirects=True)
-            response.raise_for_status()
-
-            content_length = response.headers.get("content-length")
-            if content_length is None:
-                # Can't verify size, assume needs download if we got here
-                return True
-
-            remote_size = int(content_length)
-            return local_size != remote_size
-
-        except httpx.HTTPError:
-            # On error, assume file needs download
-            return True
-
-
-async def get_files_to_download(
+def get_files_to_download(
     file_paths: list[str],
     base_url: str,
     download_dir: Path,
-    max_concurrent_checks: int = 50,
     on_progress: Callable[[int, int], None] | None = None,
-) -> list[tuple[str, str]]:
-    """Determine which files need to be downloaded using parallel HEAD requests.
+) -> tuple[list[tuple[str, str]], dict[str, int]]:
+    """Determine which files need to be downloaded by checking local existence.
 
-    Returns list of (url, local_filename) tuples for files that need downloading.
+    Trust local files: if a file exists with size > 0, it's considered complete.
+    No HEAD requests are made - this is reliable and fast.
+
+    Returns:
+        - list of (url, local_filename) tuples for files that need downloading
+        - updated cache dict with local file sizes
     """
-    semaphore = asyncio.Semaphore(max_concurrent_checks)
     to_download: list[tuple[str, str]] = []
+    updated_cache: dict[str, int] = {}
     total = len(file_paths)
-    completed = [0]  # Mutable container for counter
 
-    async def check_with_progress(
-        client: httpx.AsyncClient,
-        url: str,
-        local_path: Path,
-    ) -> bool:
-        """Wrapper that updates progress after each check."""
-        result = await check_file_needs_download(client, url, local_path, semaphore)
-        completed[0] += 1
+    for i, relative_path in enumerate(file_paths):
+        filename = os.path.basename(relative_path)
+        local_path = download_dir / filename
+        url = f"{base_url}{relative_path}"
+
+        if local_path.exists():
+            local_size = local_path.stat().st_size
+            if local_size > 0:
+                # File exists and has content - trust it
+                updated_cache[filename] = local_size
+                if on_progress:
+                    on_progress(i + 1, total)
+                continue
+
+        # File missing or empty - needs download
+        to_download.append((url, filename))
         if on_progress:
-            on_progress(completed[0], total)
-        return result
+            on_progress(i + 1, total)
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        tasks = []
-
-        for relative_path in file_paths:
-            filename = os.path.basename(relative_path)
-            local_path = download_dir / filename
-            url = f"{base_url}{relative_path}"
-
-            task = check_with_progress(client, url, local_path)
-            tasks.append((url, filename, task))
-
-        # Gather all results
-        results = await asyncio.gather(*[t[2] for t in tasks], return_exceptions=True)
-
-        for (url, filename, _), needs_download in zip(tasks, results):
-            if isinstance(needs_download, Exception):
-                # On exception, include file for download
-                to_download.append((url, filename))
-            elif needs_download:
-                to_download.append((url, filename))
-
-    return to_download
+    return to_download, updated_cache
 
 
 def load_session_urls(session_file: Path) -> set[str]:
@@ -168,7 +121,7 @@ def run_aria2c(
         "--auto-file-renaming=false",  # Don't rename on conflict
         "--console-log-level=notice",  # Show progress
         "--summary-interval=5",  # Summary every 5 seconds
-        "--file-allocation=falloc",  # It is recommended for newer file systems like ext4 (with extents enabled), btrfs, or xfs
+        #    "--file-allocation=falloc",  # It is recommended for newer file systems like ext4 (with extents enabled), btrfs, or xfs
         f"-i{input_file}",  # Input file
     ]
 
@@ -176,7 +129,7 @@ def run_aria2c(
     return result.returncode
 
 
-async def download_files_async(
+def download_files_impl(
     config: Config,
     file_paths: list[str],
     on_verify_start: Callable[[int], None] | None = None,
@@ -192,8 +145,8 @@ async def download_files_async(
     if on_verify_start:
         on_verify_start(total_files)
 
-    # Get files that need downloading (missing or incomplete)
-    files_to_download = await get_files_to_download(
+    # Get files that need downloading (missing or empty locally)
+    files_to_download, _ = get_files_to_download(
         file_paths,
         config.base_url,
         config.download_dir,
@@ -254,13 +207,11 @@ def download_files(
     on_verify_progress: Callable[[int, int], None] | None = None,
     on_verify_complete: Callable[[int], None] | None = None,
 ) -> DownloadResult:
-    """Synchronous wrapper for download_files_async."""
-    return asyncio.run(
-        download_files_async(
-            config,
-            file_paths,
-            on_verify_start,
-            on_verify_progress,
-            on_verify_complete,
-        )
+    """Download files, checking local existence to determine what needs downloading."""
+    return download_files_impl(
+        config,
+        file_paths,
+        on_verify_start,
+        on_verify_progress,
+        on_verify_complete,
     )
