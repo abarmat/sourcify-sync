@@ -11,3 +11,6 @@ aria2c_path = "aria2c"
 
 # Number of concurrent downloads
 concurrent_downloads = 5
+
+# Verify parquet file integrity after download (validates metadata and schema)
+integrity_check = true

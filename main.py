@@ -54,6 +54,7 @@ def main() -> int:
     print(f"Manifest URL: {config.manifest_url}")
     print(f"Download directory: {config.download_dir}")
     print(f"Concurrent downloads: {config.concurrent_downloads}")
+    print(f"Integrity check: {'enabled' if config.integrity_check else 'disabled'}")
     print()
 
     print("Fetching manifest...")
@@ -111,6 +112,7 @@ def main() -> int:
         on_integrity_start=on_integrity_start,
         on_integrity_progress=on_integrity_progress,
         on_integrity_complete=on_integrity_complete,
+        integrity_check=config.integrity_check,
     )
 
     print()

@@ -13,6 +13,7 @@ DEFAULTS = {
     "download_dir": "./downloads",
     "aria2c_path": "aria2c",
     "concurrent_downloads": 5,
+    "integrity_check": True,
 }
 
 
@@ -23,6 +24,7 @@ class Config:
     aria2c_path: str
     concurrent_downloads: int
     base_url: str
+    integrity_check: bool
 
     @property
     def session_file(self) -> Path:
@@ -63,4 +65,5 @@ class Config:
             aria2c_path=config_data["aria2c_path"],
             concurrent_downloads=int(config_data["concurrent_downloads"]),
             base_url=base_url,
+            integrity_check=bool(config_data.get("integrity_check", True)),
         )

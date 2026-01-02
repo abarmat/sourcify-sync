@@ -171,6 +171,7 @@ def download_files_impl(
     on_integrity_progress: Callable[[int, int], None] | None = None,
     on_integrity_complete: Callable[[int], None] | None = None,
     max_integrity_retries: int = 3,
+    integrity_check: bool = True,
 ) -> DownloadResult:
     """Download files using aria2c with robust resume support and integrity checking.
 
@@ -239,6 +240,10 @@ def download_files_impl(
             # aria2c failed, don't run integrity check
             break
 
+        # Skip integrity check if disabled
+        if not integrity_check:
+            break
+
         # Run integrity check on downloaded files
         downloaded_filenames = [filename for _, filename in files_to_download]
 
@@ -295,6 +300,7 @@ def download_files(
     on_integrity_start: Callable[[int], None] | None = None,
     on_integrity_progress: Callable[[int, int], None] | None = None,
     on_integrity_complete: Callable[[int], None] | None = None,
+    integrity_check: bool = True,
 ) -> DownloadResult:
     """Download files, checking local existence to determine what needs downloading."""
     return download_files_impl(
@@ -306,4 +312,5 @@ def download_files(
         on_integrity_start,
         on_integrity_progress,
         on_integrity_complete,
+        integrity_check=integrity_check,
     )
