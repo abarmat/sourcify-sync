@@ -10,3 +10,9 @@ dependencies = [
 
 [project.scripts]
 sourcify-sync = "main:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-httpx>=0.30.0",
+]
