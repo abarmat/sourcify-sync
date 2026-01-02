@@ -84,12 +84,33 @@ def main() -> int:
         if to_download > 0:
             print("Starting download...")
 
+    def on_integrity_start(total: int) -> None:
+        print()
+        print("Verifying parquet file integrity...")
+
+    def on_integrity_progress(completed: int, total: int) -> None:
+        percent = completed / total
+        bar_width = 40
+        filled = int(bar_width * percent)
+        bar = "█" * filled + "░" * (bar_width - filled)
+        print(f"\rIntegrity: [{bar}] {completed}/{total}", end="", flush=True)
+
+    def on_integrity_complete(failed: int) -> None:
+        print()  # Newline after progress bar
+        if failed > 0:
+            print(f"Found {failed} corrupt files, re-downloading...")
+        else:
+            print("All files passed integrity check")
+
     result = download_files(
         config,
         file_paths,
         on_verify_start=on_verify_start,
         on_verify_progress=on_verify_progress,
         on_verify_complete=on_verify_complete,
+        on_integrity_start=on_integrity_start,
+        on_integrity_progress=on_integrity_progress,
+        on_integrity_complete=on_integrity_complete,
     )
 
     print()
@@ -100,10 +121,21 @@ def main() -> int:
     print(f"Already complete: {result.skipped_files}")
     print(f"Downloaded/resumed: {result.to_download}")
 
+    if result.integrity_retries > 0:
+        print(f"Integrity retries: {result.integrity_retries}")
+
+    if result.integrity_failures > 0:
+        print(f"Integrity failures: {result.integrity_failures}")
+        print("Warning: Some files failed integrity checks after max retries.")
+
     if result.aria2c_exit_code != 0:
         print(f"aria2c exit code: {result.aria2c_exit_code}")
         print("Note: Session saved. Run again to resume incomplete downloads.")
         return result.aria2c_exit_code
+
+    if result.integrity_failures > 0:
+        print("Sync completed with errors.")
+        return 1
 
     print("All files synced successfully!")
     return 0

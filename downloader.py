@@ -16,6 +16,8 @@ class DownloadResult:
     skipped_files: int
     to_download: int
     aria2c_exit_code: int
+    integrity_failures: int = 0
+    integrity_retries: int = 0
 
 
 def get_files_to_download(
@@ -101,6 +103,36 @@ def create_aria2c_input_file(files_to_download: list[tuple[str, str]]) -> Path:
     return Path(path)
 
 
+def verify_parquet_integrity(
+    download_dir: Path,
+    filenames: list[str],
+    on_progress: Callable[[int, int], None] | None = None,
+) -> list[str]:
+    """Verify parquet files are valid by reading metadata and schema.
+
+    Returns list of filenames that failed validation (corrupt files are deleted).
+    """
+    import pyarrow.parquet as pq
+
+    failed = []
+    total = len(filenames)
+
+    for i, filename in enumerate(filenames):
+        filepath = download_dir / filename
+        if filepath.exists() and filepath.suffix == ".parquet":
+            try:
+                pq.read_metadata(filepath)  # Validate file structure/footer
+                pq.read_schema(filepath)  # Validate column definitions
+            except Exception:
+                failed.append(filename)
+                filepath.unlink()  # Delete corrupt file
+
+        if on_progress:
+            on_progress(i + 1, total)
+
+    return failed
+
+
 def run_aria2c(
     config: Config,
     input_file: Path,
@@ -135,8 +167,12 @@ def download_files_impl(
     on_verify_start: Callable[[int], None] | None = None,
     on_verify_progress: Callable[[int, int], None] | None = None,
     on_verify_complete: Callable[[int], None] | None = None,
+    on_integrity_start: Callable[[int], None] | None = None,
+    on_integrity_progress: Callable[[int, int], None] | None = None,
+    on_integrity_complete: Callable[[int], None] | None = None,
+    max_integrity_retries: int = 3,
 ) -> DownloadResult:
-    """Download files using aria2c with robust resume support.
+    """Download files using aria2c with robust resume support and integrity checking.
 
     Returns DownloadResult with statistics.
     """
@@ -168,6 +204,7 @@ def download_files_impl(
         on_verify_complete(len(files_to_download))
 
     skipped_files = total_files - len(files_to_download)
+    initial_to_download = len(files_to_download)
 
     if not files_to_download:
         # Clean up session file if everything is complete
@@ -181,12 +218,59 @@ def download_files_impl(
             aria2c_exit_code=0,
         )
 
-    input_file = create_aria2c_input_file(files_to_download)
+    # Build URL lookup for re-downloads
+    url_by_filename: dict[str, str] = {
+        filename: url for url, filename in files_to_download
+    }
 
-    try:
-        exit_code = run_aria2c(config, input_file)
-    finally:
-        input_file.unlink(missing_ok=True)
+    exit_code = 0
+    integrity_retries = 0
+    permanent_failures: list[str] = []
+
+    while files_to_download:
+        input_file = create_aria2c_input_file(files_to_download)
+
+        try:
+            exit_code = run_aria2c(config, input_file)
+        finally:
+            input_file.unlink(missing_ok=True)
+
+        if exit_code != 0:
+            # aria2c failed, don't run integrity check
+            break
+
+        # Run integrity check on downloaded files
+        downloaded_filenames = [filename for _, filename in files_to_download]
+
+        if on_integrity_start:
+            on_integrity_start(len(downloaded_filenames))
+
+        failed_files = verify_parquet_integrity(
+            config.download_dir,
+            downloaded_filenames,
+            on_progress=on_integrity_progress,
+        )
+
+        if on_integrity_complete:
+            on_integrity_complete(len(failed_files))
+
+        if not failed_files:
+            # All files passed integrity check
+            break
+
+        integrity_retries += 1
+
+        if integrity_retries >= max_integrity_retries:
+            # Max retries reached, record permanent failures
+            permanent_failures.extend(failed_files)
+            break
+
+        # Rebuild download list for failed files
+        files_to_download = [
+            (url_by_filename[filename], filename)
+            for filename in failed_files
+            if filename in url_by_filename
+        ]
 
     # Clean up session file if download completed successfully
     if exit_code == 0 and config.session_file.exists():
@@ -195,8 +279,10 @@ def download_files_impl(
     return DownloadResult(
         total_files=total_files,
         skipped_files=skipped_files,
-        to_download=len(files_to_download),
+        to_download=initial_to_download,
         aria2c_exit_code=exit_code,
+        integrity_failures=len(permanent_failures),
+        integrity_retries=integrity_retries,
     )
 
 
@@ -206,6 +292,9 @@ def download_files(
     on_verify_start: Callable[[int], None] | None = None,
     on_verify_progress: Callable[[int, int], None] | None = None,
     on_verify_complete: Callable[[int], None] | None = None,
+    on_integrity_start: Callable[[int], None] | None = None,
+    on_integrity_progress: Callable[[int, int], None] | None = None,
+    on_integrity_complete: Callable[[int], None] | None = None,
 ) -> DownloadResult:
     """Download files, checking local existence to determine what needs downloading."""
     return download_files_impl(
@@ -214,4 +303,7 @@ def download_files(
         on_verify_start,
         on_verify_progress,
         on_verify_complete,
+        on_integrity_start,
+        on_integrity_progress,
+        on_integrity_complete,
     )
