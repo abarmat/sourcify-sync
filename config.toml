@@ -14,3 +14,6 @@ concurrent_downloads = 5
 
 # Verify parquet file integrity after download (validates metadata and schema)
 integrity_check = true
+
+# Number of times to retry downloading files that fail integrity checks
+integrity_retry_count = 3

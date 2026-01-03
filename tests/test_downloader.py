@@ -140,6 +140,8 @@ class TestRunAria2c:
             aria2c_path="/usr/bin/aria2c",
             concurrent_downloads=10,
             base_url="https://example.com/",
+            integrity_check=True,
+            integrity_retry_count=3,
         )
         input_file = tmp_path / "input.txt"
         input_file.write_text("")
@@ -166,6 +168,8 @@ class TestRunAria2c:
             aria2c_path="aria2c",
             concurrent_downloads=5,
             base_url="https://example.com/",
+            integrity_check=True,
+            integrity_retry_count=3,
         )
         input_file = tmp_path / "input.txt"
         input_file.write_text("")
@@ -189,6 +193,8 @@ class TestDownloadFiles:
             aria2c_path="aria2c",
             concurrent_downloads=5,
             base_url="https://example.com/",
+            integrity_check=True,
+            integrity_retry_count=3,
         )
         config.download_dir.mkdir()
 

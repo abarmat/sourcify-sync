@@ -14,6 +14,7 @@ DEFAULTS = {
     "aria2c_path": "aria2c",
     "concurrent_downloads": 5,
     "integrity_check": True,
+    "integrity_retry_count": 3,
 }
 
 
@@ -25,6 +26,7 @@ class Config:
     concurrent_downloads: int
     base_url: str
     integrity_check: bool
+    integrity_retry_count: int
 
     @property
     def session_file(self) -> Path:
@@ -38,6 +40,7 @@ class Config:
         download_dir_override: str | None = None,
         manifest_url_override: str | None = None,
         concurrency_override: int | None = None,
+        integrity_retry_count_override: int | None = None,
     ) -> "Config":
         """Load configuration from TOML file with defaults."""
         config_data = dict(DEFAULTS)
@@ -54,6 +57,8 @@ class Config:
             config_data["manifest_url"] = manifest_url_override
         if concurrency_override is not None:
             config_data["concurrent_downloads"] = concurrency_override
+        if integrity_retry_count_override is not None:
+            config_data["integrity_retry_count"] = integrity_retry_count_override
 
         manifest_url = config_data["manifest_url"]
         parsed = urlparse(manifest_url)
@@ -66,4 +71,5 @@ class Config:
             concurrent_downloads=int(config_data["concurrent_downloads"]),
             base_url=base_url,
             integrity_check=bool(config_data.get("integrity_check", True)),
+            integrity_retry_count=int(config_data.get("integrity_retry_count", 3)),
         )

@@ -38,6 +38,8 @@ def sample_config(tmp_path):
         aria2c_path="aria2c",
         concurrent_downloads=5,
         base_url="https://example.com/",
+        integrity_check=True,
+        integrity_retry_count=3,
     )
 
 

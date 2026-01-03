@@ -323,6 +323,7 @@ def download_files(
     on_integrity_complete: Callable[[int], None] | None = None,
     integrity_check: bool = True,
     run_integrity: bool = False,
+    max_integrity_retries: int = 3,
 ) -> DownloadResult:
     """Download files, checking local existence to determine what needs downloading."""
     return download_files_impl(
@@ -334,6 +335,7 @@ def download_files(
         on_integrity_start,
         on_integrity_progress,
         on_integrity_complete,
+        max_integrity_retries=max_integrity_retries,
         integrity_check=integrity_check,
         run_integrity=run_integrity,
     )

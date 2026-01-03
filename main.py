@@ -43,6 +43,12 @@ def parse_args() -> argparse.Namespace:
         default=False,
         help="Run integrity check on existing files before downloading",
     )
+    parser.add_argument(
+        "-i", "--integrity-retries",
+        type=int,
+        default=None,
+        help="Number of times to retry downloading files that fail integrity checks",
+    )
     return parser.parse_args()
 
 
@@ -55,12 +61,14 @@ def main() -> int:
         download_dir_override=args.download_dir,
         manifest_url_override=args.manifest_url,
         concurrency_override=args.concurrency,
+        integrity_retry_count_override=args.integrity_retries,
     )
 
     print(f"Manifest URL: {config.manifest_url}")
     print(f"Download directory: {config.download_dir}")
     print(f"Concurrent downloads: {config.concurrent_downloads}")
     print(f"Integrity check: {'enabled' if config.integrity_check else 'disabled'}")
+    print(f"Integrity retries: {config.integrity_retry_count}")
     if args.run_integrity:
         print("Pre-download integrity check: enabled")
     print()
@@ -122,6 +130,7 @@ def main() -> int:
         on_integrity_complete=on_integrity_complete,
         integrity_check=config.integrity_check,
         run_integrity=args.run_integrity,
+        max_integrity_retries=config.integrity_retry_count,
     )
 
     print()
