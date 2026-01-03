@@ -37,6 +37,12 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Number of concurrent downloads",
     )
+    parser.add_argument(
+        "-r", "--run-integrity",
+        action="store_true",
+        default=False,
+        help="Run integrity check on existing files before downloading",
+    )
     return parser.parse_args()
 
 
@@ -55,6 +61,8 @@ def main() -> int:
     print(f"Download directory: {config.download_dir}")
     print(f"Concurrent downloads: {config.concurrent_downloads}")
     print(f"Integrity check: {'enabled' if config.integrity_check else 'disabled'}")
+    if args.run_integrity:
+        print("Pre-download integrity check: enabled")
     print()
 
     print("Fetching manifest...")
@@ -113,6 +121,7 @@ def main() -> int:
         on_integrity_progress=on_integrity_progress,
         on_integrity_complete=on_integrity_complete,
         integrity_check=config.integrity_check,
+        run_integrity=args.run_integrity,
     )
 
     print()

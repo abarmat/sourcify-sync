@@ -32,10 +32,16 @@ This is a Python CLI tool that downloads files from a remote manifest using aria
 | `downloader.py` | Async file verification via HEAD requests, aria2c execution with session support |
 
 **Key design decisions:**
+
 - Uses async httpx for parallel HEAD requests to verify file completeness (size check)
 - aria2c session file (`{download_dir}/.aria2c-session`) persists state for resume across runs
 - Files are flattened: `code/code_0_100000.parquet` → `code_0_100000.parquet`
 - Base URL is auto-derived from manifest URL
+
+## Contributing
+
+- When writing commit messages do it with a brief description. If there are many changes use at most 3 bullets.
+- When creating a PR, do not include any message about attribution. Keep it clean.
 
 ## Requirements
 
