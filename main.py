@@ -49,10 +49,17 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=None,
         help="Number of times to retry downloading files that fail integrity checks",
-        "-v", "--concurrent-validations",
+    )
+    parser.add_argument(
+        "--concurrent-validations",
         type=int,
         default=None,
         help="Number of concurrent parquet validations (default: CPU count)",
+    )
+    parser.add_argument(
+        "-n", "--dry-run",
+        action="store_true",
+        help="Preview what would be downloaded without downloading",
     )
 
     # Logging verbosity (mutually exclusive)
@@ -104,6 +111,10 @@ def main() -> int:
     logger.info("Concurrent validations: %s", config.concurrent_validations)
     if args.run_integrity:
         logger.info("Pre-download integrity check: enabled")
+    if args.dry_run:
+        logger.info("")
+        logger.info("DRY RUN MODE - no files will be downloaded")
+        logger.info("")
 
     logger.debug("Fetching manifest...")
     try:
@@ -128,7 +139,7 @@ def main() -> int:
     def on_verify_complete(to_download: int) -> None:
         print()  # Newline after progress bar
         logger.info("Found %d files to download", to_download)
-        if to_download > 0:
+        if to_download > 0 and not args.dry_run:
             logger.info("Starting download...")
 
     def on_integrity_start(total: int) -> None:
@@ -161,33 +172,42 @@ def main() -> int:
         integrity_check=config.integrity_check,
         run_integrity=args.run_integrity,
         max_integrity_retries=config.integrity_retry_count,
+        dry_run=args.dry_run,
     )
 
     logger.info("")
     logger.info("=" * 50)
-    logger.info("Download Summary")
+    if args.dry_run:
+        logger.info("Dry Run Summary")
+    else:
+        logger.info("Download Summary")
     logger.info("=" * 50)
     logger.info("Total files in manifest: %d", result.total_files)
     logger.info("Already complete: %d", result.skipped_files)
-    logger.info("Downloaded/resumed: %d", result.to_download)
+    if args.dry_run:
+        logger.info("Would download: %d", result.to_download)
+    else:
+        logger.info("Downloaded/resumed: %d", result.to_download)
 
-    if result.integrity_retries > 0:
-        logger.info("Integrity retries: %d", result.integrity_retries)
+    if not args.dry_run:
+        if result.integrity_retries > 0:
+            logger.info("Integrity retries: %d", result.integrity_retries)
 
-    if result.integrity_failures > 0:
-        logger.warning("Integrity failures: %d", result.integrity_failures)
-        logger.warning("Some files failed integrity checks after max retries.")
+        if result.integrity_failures > 0:
+            logger.warning("Integrity failures: %d", result.integrity_failures)
+            logger.warning("Some files failed integrity checks after max retries.")
 
-    if result.aria2c_exit_code != 0:
-        logger.warning("aria2c exit code: %d", result.aria2c_exit_code)
-        logger.info("Note: Session saved. Run again to resume incomplete downloads.")
-        return result.aria2c_exit_code
+        if result.aria2c_exit_code != 0:
+            logger.warning("aria2c exit code: %d", result.aria2c_exit_code)
+            logger.info("Note: Session saved. Run again to resume incomplete downloads.")
+            return result.aria2c_exit_code
 
-    if result.integrity_failures > 0:
-        logger.warning("Sync completed with errors.")
-        return 1
+        if result.integrity_failures > 0:
+            logger.warning("Sync completed with errors.")
+            return 1
 
-    logger.info("All files synced successfully!")
+        logger.info("All files synced successfully!")
+
     return 0
 
 

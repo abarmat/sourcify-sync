@@ -208,6 +208,7 @@ def download_files_impl(
     max_integrity_retries: int = 3,
     integrity_check: bool = True,
     run_integrity: bool = False,
+    dry_run: bool = False,
 ) -> DownloadResult:
     """Download files using aria2c with robust resume support and integrity checking.
 
@@ -215,8 +216,8 @@ def download_files_impl(
     """
     total_files = len(file_paths)
 
-    # Run pre-download integrity check if requested
-    if run_integrity:
+    # Run pre-download integrity check if requested (skip in dry-run mode)
+    if run_integrity and not dry_run:
         config.download_dir.mkdir(parents=True, exist_ok=True)
         existing_files = [
             f.name for f in config.download_dir.glob("*.parquet")
@@ -273,6 +274,15 @@ def download_files_impl(
             total_files=total_files,
             skipped_files=skipped_files,
             to_download=0,
+            aria2c_exit_code=0,
+        )
+
+    # Dry run: return without downloading
+    if dry_run:
+        return DownloadResult(
+            total_files=total_files,
+            skipped_files=skipped_files,
+            to_download=initial_to_download,
             aria2c_exit_code=0,
         )
 
@@ -361,6 +371,7 @@ def download_files(
     integrity_check: bool = True,
     run_integrity: bool = False,
     max_integrity_retries: int = 3,
+    dry_run: bool = False,
 ) -> DownloadResult:
     """Download files, checking local existence to determine what needs downloading."""
     return download_files_impl(
@@ -375,4 +386,5 @@ def download_files(
         max_integrity_retries=max_integrity_retries,
         integrity_check=integrity_check,
         run_integrity=run_integrity,
+        dry_run=dry_run,
     )
