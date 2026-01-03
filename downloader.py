@@ -3,6 +3,8 @@
 import os
 import subprocess
 import tempfile
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from collections.abc import Callable
 from pathlib import Path
@@ -107,28 +109,57 @@ def verify_parquet_integrity(
     download_dir: Path,
     filenames: list[str],
     on_progress: Callable[[int, int], None] | None = None,
+    max_workers: int = 4,
 ) -> list[str]:
     """Verify parquet files are valid by reading metadata and schema.
 
+    Uses ThreadPoolExecutor for concurrent validation.
     Returns list of filenames that failed validation (corrupt files are deleted).
     """
     import pyarrow.parquet as pq
 
-    failed = []
+    failed: list[str] = []
+    failed_lock = threading.Lock()
+    progress_counter = 0
+    progress_lock = threading.Lock()
     total = len(filenames)
 
-    for i, filename in enumerate(filenames):
+    def validate_single_file(filename: str) -> tuple[str, bool]:
+        """Validate a single parquet file. Returns (filename, is_valid)."""
         filepath = download_dir / filename
-        if filepath.exists() and filepath.suffix == ".parquet":
+        if not filepath.exists() or filepath.suffix != ".parquet":
+            return (filename, True)  # Skip non-parquet or missing files
+        try:
+            pq.read_metadata(filepath)  # Validate file structure/footer
+            pq.read_schema(filepath)  # Validate column definitions
+            return (filename, True)
+        except Exception:
             try:
-                pq.read_metadata(filepath)  # Validate file structure/footer
-                pq.read_schema(filepath)  # Validate column definitions
-            except Exception:
-                failed.append(filename)
                 filepath.unlink()  # Delete corrupt file
+            except OSError:
+                pass
+            return (filename, False)
 
+    def update_progress() -> None:
+        """Thread-safe progress update."""
+        nonlocal progress_counter
+        with progress_lock:
+            progress_counter += 1
+            current = progress_counter
         if on_progress:
-            on_progress(i + 1, total)
+            on_progress(current, total)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(validate_single_file, filename): filename
+            for filename in filenames
+        }
+        for future in as_completed(futures):
+            filename, is_valid = future.result()
+            if not is_valid:
+                with failed_lock:
+                    failed.append(filename)
+            update_progress()
 
     return failed
 
@@ -195,6 +226,7 @@ def download_files_impl(
                 config.download_dir,
                 existing_files,
                 on_progress=on_integrity_progress,
+                max_workers=config.concurrent_validations,
             )
 
             if on_integrity_complete:
@@ -275,6 +307,7 @@ def download_files_impl(
             config.download_dir,
             downloaded_filenames,
             on_progress=on_integrity_progress,
+            max_workers=config.concurrent_validations,
         )
 
         if on_integrity_complete:

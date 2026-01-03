@@ -48,6 +48,10 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=None,
         help="Number of times to retry downloading files that fail integrity checks",
+        "-v", "--concurrent-validations",
+        type=int,
+        default=None,
+        help="Number of concurrent parquet validations (default: CPU count)",
     )
     return parser.parse_args()
 
@@ -62,11 +66,13 @@ def main() -> int:
         manifest_url_override=args.manifest_url,
         concurrency_override=args.concurrency,
         integrity_retry_count_override=args.integrity_retries,
+        concurrent_validations_override=args.concurrent_validations,
     )
 
     print(f"Manifest URL: {config.manifest_url}")
     print(f"Download directory: {config.download_dir}")
     print(f"Concurrent downloads: {config.concurrent_downloads}")
+    print(f"Concurrent validations: {config.concurrent_validations}")
     print(f"Integrity check: {'enabled' if config.integrity_check else 'disabled'}")
     print(f"Integrity retries: {config.integrity_retry_count}")
     if args.run_integrity:

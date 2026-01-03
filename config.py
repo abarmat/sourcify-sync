@@ -1,5 +1,6 @@
 """Configuration loading and validation for sourcify-sync."""
 
+import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +16,7 @@ DEFAULTS = {
     "concurrent_downloads": 5,
     "integrity_check": True,
     "integrity_retry_count": 3,
+    "concurrent_validations": None,  # None = os.cpu_count() or 4
 }
 
 
@@ -27,6 +29,7 @@ class Config:
     base_url: str
     integrity_check: bool
     integrity_retry_count: int
+    concurrent_validations: int
 
     @property
     def session_file(self) -> Path:
@@ -41,6 +44,7 @@ class Config:
         manifest_url_override: str | None = None,
         concurrency_override: int | None = None,
         integrity_retry_count_override: int | None = None,
+        concurrent_validations_override: int | None = None,
     ) -> "Config":
         """Load configuration from TOML file with defaults."""
         config_data = dict(DEFAULTS)
@@ -59,6 +63,13 @@ class Config:
             config_data["concurrent_downloads"] = concurrency_override
         if integrity_retry_count_override is not None:
             config_data["integrity_retry_count"] = integrity_retry_count_override
+        if concurrent_validations_override is not None:
+            config_data["concurrent_validations"] = concurrent_validations_override
+
+        # Resolve concurrent_validations default
+        concurrent_validations = config_data.get("concurrent_validations")
+        if concurrent_validations is None:
+            concurrent_validations = os.cpu_count() or 4
 
         manifest_url = config_data["manifest_url"]
         parsed = urlparse(manifest_url)
@@ -72,4 +83,5 @@ class Config:
             base_url=base_url,
             integrity_check=bool(config_data.get("integrity_check", True)),
             integrity_retry_count=int(config_data.get("integrity_retry_count", 3)),
+            concurrent_validations=int(concurrent_validations),
         )
