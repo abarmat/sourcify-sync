@@ -1,0 +1,33 @@
+{
+  "alwaysThinkingEnabled": true,
+  "permissions": {
+    "allow": [
+      "Bash(ls:*)",
+      "Bash(uv sync)",
+      "Bash(uv run python:*)",
+      "Bash(uv run pytest:*)",
+      "Bash(just check-crate:*)",
+      "Bash(just clippy-crate:*)",
+      "Bash(cargo test:*)",
+      "Bash(git status)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(aria2c:*)"
+    ],
+    "deny": [
+      "Read(.env)",
+      "Read(.env.*)",
+      "Read(**/credentials*)",
+      "Read(**/secrets/**)"
+    ]
+  },
+  "env": {
+    "PYTHONUNBUFFERED": "1"
+  },
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  }
+}
