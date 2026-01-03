@@ -100,6 +100,8 @@ def main() -> int:
     logger.info("Download directory: %s", config.download_dir)
     logger.info("Concurrent downloads: %s", config.concurrent_downloads)
     logger.info("Integrity check: %s", "enabled" if config.integrity_check else "disabled")
+    logger.info("Integrity retries: %s", config.integrity_retry_count)
+    logger.info("Concurrent validations: %s", config.concurrent_validations)
     if args.run_integrity:
         logger.info("Pre-download integrity check: enabled")
 
