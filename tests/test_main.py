@@ -1,5 +1,6 @@
 """Tests for main.py."""
 
+import logging
 import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -48,6 +49,29 @@ class TestParseArgs:
 
         assert args.config == Path("custom.toml")
 
+    def test_verbose_flag(self):
+        """Parses verbose flag."""
+        with patch.object(sys, "argv", ["main.py", "-v"]):
+            args = parse_args()
+
+        assert args.verbose is True
+        assert args.quiet is False
+
+    def test_quiet_flag(self):
+        """Parses quiet flag."""
+        with patch.object(sys, "argv", ["main.py", "-q"]):
+            args = parse_args()
+
+        assert args.quiet is True
+        assert args.verbose is False
+
+    def test_log_file_arg(self):
+        """Parses log file argument."""
+        with patch.object(sys, "argv", ["main.py", "--log-file", "/tmp/test.log"]):
+            args = parse_args()
+
+        assert args.log_file == Path("/tmp/test.log")
+
 
 class TestMain:
     """Tests for main()."""
@@ -78,7 +102,7 @@ class TestMain:
 
         assert exit_code == 0
 
-    def test_returns_one_on_manifest_fetch_error(self, tmp_path, capsys):
+    def test_returns_one_on_manifest_fetch_error(self, tmp_path, caplog):
         """Returns 1 exit code when manifest fetch fails."""
         with patch.object(sys, "argv", ["main.py"]), \
              patch("main.Config.load") as mock_config, \
@@ -91,8 +115,8 @@ class TestMain:
             )
             mock_fetch.side_effect = Exception("Network error")
 
-            exit_code = main()
+            with caplog.at_level(logging.ERROR):
+                exit_code = main()
 
         assert exit_code == 1
-        captured = capsys.readouterr()
-        assert "Error fetching manifest" in captured.err
+        assert "Error fetching manifest" in caplog.text

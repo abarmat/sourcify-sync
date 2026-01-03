@@ -6,6 +6,7 @@ from pathlib import Path
 
 from config import Config
 from downloader import download_files
+from logging_setup import get_logger, setup_logging, write_progress
 from manifest import extract_file_paths, fetch_manifest
 
 
@@ -53,13 +54,39 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Number of concurrent parquet validations (default: CPU count)",
     )
+
+    # Logging verbosity (mutually exclusive)
+    verbosity_group = parser.add_mutually_exclusive_group()
+    verbosity_group.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="Enable verbose output (DEBUG level)",
+    )
+    verbosity_group.add_argument(
+        "-q", "--quiet",
+        action="store_true",
+        help="Quiet mode (only warnings and errors)",
+    )
+
+    parser.add_argument(
+        "--log-file",
+        type=Path,
+        default=None,
+        help="Write logs to file (always DEBUG level)",
+    )
+
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
 
-    print("Loading configuration...")
+    # Setup logging first
+    verbosity = 1 if args.verbose else (-1 if args.quiet else 0)
+    setup_logging(verbosity=verbosity, log_file=args.log_file)
+    logger = get_logger()
+
+    logger.debug("Loading configuration...")
     config = Config.load(
         config_path=args.config,
         download_dir_override=args.download_dir,
@@ -69,61 +96,56 @@ def main() -> int:
         concurrent_validations_override=args.concurrent_validations,
     )
 
-    print(f"Manifest URL: {config.manifest_url}")
-    print(f"Download directory: {config.download_dir}")
-    print(f"Concurrent downloads: {config.concurrent_downloads}")
-    print(f"Concurrent validations: {config.concurrent_validations}")
-    print(f"Integrity check: {'enabled' if config.integrity_check else 'disabled'}")
-    print(f"Integrity retries: {config.integrity_retry_count}")
+    logger.info("Manifest URL: %s", config.manifest_url)
+    logger.info("Download directory: %s", config.download_dir)
+    logger.info("Concurrent downloads: %s", config.concurrent_downloads)
+    logger.info("Integrity check: %s", "enabled" if config.integrity_check else "disabled")
     if args.run_integrity:
-        print("Pre-download integrity check: enabled")
-    print()
+        logger.info("Pre-download integrity check: enabled")
 
-    print("Fetching manifest...")
+    logger.debug("Fetching manifest...")
     try:
         manifest = fetch_manifest(config.manifest_url)
     except Exception as e:
-        print(f"Error fetching manifest: {e}", file=sys.stderr)
+        logger.error("Error fetching manifest: %s", e)
         return 1
 
     file_paths = extract_file_paths(manifest)
-    print(f"Found {len(file_paths)} files in manifest")
-    print()
+    logger.info("Found %d files in manifest", len(file_paths))
 
     def on_verify_start(total: int) -> None:
-        print("Verifying files...")
+        logger.debug("Verifying files...")
 
     def on_verify_progress(completed: int, total: int) -> None:
         percent = completed / total
         bar_width = 40
         filled = int(bar_width * percent)
         bar = "█" * filled + "░" * (bar_width - filled)
-        print(f"\rVerifying: [{bar}] {completed}/{total}", end="", flush=True)
+        write_progress(f"Verifying: [{bar}] {completed}/{total}")
 
     def on_verify_complete(to_download: int) -> None:
         print()  # Newline after progress bar
-        print(f"Found {to_download} files to download")
-        print()
+        logger.info("Found %d files to download", to_download)
         if to_download > 0:
-            print("Starting download...")
+            logger.info("Starting download...")
 
     def on_integrity_start(total: int) -> None:
-        print()
-        print("Verifying parquet file integrity...")
+        print()  # Newline before integrity check
+        logger.debug("Verifying parquet file integrity...")
 
     def on_integrity_progress(completed: int, total: int) -> None:
         percent = completed / total
         bar_width = 40
         filled = int(bar_width * percent)
         bar = "█" * filled + "░" * (bar_width - filled)
-        print(f"\rIntegrity: [{bar}] {completed}/{total}", end="", flush=True)
+        write_progress(f"Integrity: [{bar}] {completed}/{total}")
 
     def on_integrity_complete(failed: int) -> None:
         print()  # Newline after progress bar
         if failed > 0:
-            print(f"Found {failed} corrupt files, re-downloading...")
+            logger.warning("Found %d corrupt files, re-downloading...", failed)
         else:
-            print("All files passed integrity check")
+            logger.info("All files passed integrity check")
 
     result = download_files(
         config,
@@ -139,31 +161,31 @@ def main() -> int:
         max_integrity_retries=config.integrity_retry_count,
     )
 
-    print()
-    print("=" * 50)
-    print("Download Summary")
-    print("=" * 50)
-    print(f"Total files in manifest: {result.total_files}")
-    print(f"Already complete: {result.skipped_files}")
-    print(f"Downloaded/resumed: {result.to_download}")
+    logger.info("")
+    logger.info("=" * 50)
+    logger.info("Download Summary")
+    logger.info("=" * 50)
+    logger.info("Total files in manifest: %d", result.total_files)
+    logger.info("Already complete: %d", result.skipped_files)
+    logger.info("Downloaded/resumed: %d", result.to_download)
 
     if result.integrity_retries > 0:
-        print(f"Integrity retries: {result.integrity_retries}")
+        logger.info("Integrity retries: %d", result.integrity_retries)
 
     if result.integrity_failures > 0:
-        print(f"Integrity failures: {result.integrity_failures}")
-        print("Warning: Some files failed integrity checks after max retries.")
+        logger.warning("Integrity failures: %d", result.integrity_failures)
+        logger.warning("Some files failed integrity checks after max retries.")
 
     if result.aria2c_exit_code != 0:
-        print(f"aria2c exit code: {result.aria2c_exit_code}")
-        print("Note: Session saved. Run again to resume incomplete downloads.")
+        logger.warning("aria2c exit code: %d", result.aria2c_exit_code)
+        logger.info("Note: Session saved. Run again to resume incomplete downloads.")
         return result.aria2c_exit_code
 
     if result.integrity_failures > 0:
-        print("Sync completed with errors.")
+        logger.warning("Sync completed with errors.")
         return 1
 
-    print("All files synced successfully!")
+    logger.info("All files synced successfully!")
     return 0
 
 

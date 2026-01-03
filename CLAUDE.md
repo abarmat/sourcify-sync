@@ -14,8 +14,17 @@ uv run python main.py
 # Run with CLI overrides
 uv run python main.py -d /path/to/downloads -m https://example.com/manifest.json -j 10
 
+# Run with verbose logging
+uv run python main.py -v
+
+# Run in quiet mode (warnings/errors only)
+uv run python main.py -q
+
+# Log to file
+uv run python main.py --log-file sync.log
+
 # Check syntax
-uv run python -m py_compile main.py config.py manifest.py downloader.py
+uv run python -m py_compile main.py config.py manifest.py downloader.py logging_setup.py
 ```
 
 ## Architecture
@@ -30,6 +39,7 @@ This is a Python CLI tool that downloads files from a remote manifest using aria
 | `config.py` | TOML config loading with CLI override support |
 | `manifest.py` | Fetch and parse manifest JSON from remote URL |
 | `downloader.py` | Local file verification, aria2c execution with session support, parquet integrity checking |
+| `logging_setup.py` | Logging configuration with verbosity levels and file output support |
 
 **Key design decisions:**
 - Trusts local files: if a file exists with size > 0, it's considered complete (no HEAD requests)
