@@ -29,13 +29,14 @@ This is a Python CLI tool that downloads files from a remote manifest using aria
 | `main.py` | CLI entry point, argument parsing, orchestration |
 | `config.py` | TOML config loading with CLI override support |
 | `manifest.py` | Fetch and parse manifest JSON from remote URL |
-| `downloader.py` | Async file verification via HEAD requests, aria2c execution with session support |
+| `downloader.py` | Local file verification, aria2c execution with session support, parquet integrity checking |
 
 **Key design decisions:**
-- Uses async httpx for parallel HEAD requests to verify file completeness (size check)
+- Trusts local files: if a file exists with size > 0, it's considered complete (no HEAD requests)
 - aria2c session file (`{download_dir}/.aria2c-session`) persists state for resume across runs
 - Files are flattened: `code/code_0_100000.parquet` → `code_0_100000.parquet`
 - Base URL is auto-derived from manifest URL
+- Optional parquet integrity check validates metadata/schema and retries corrupt files
 
 ## Requirements
 

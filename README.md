@@ -51,6 +51,8 @@ uv run python main.py -c /path/to/config.toml
 |--------|-------------|
 | `-c, --config` | Path to config file (default: `config.toml`) |
 | `-d, --download-dir` | Override download directory from config |
+| `-m, --manifest-url` | Override manifest URL from config |
+| `-j, --concurrency` | Number of concurrent downloads |
 
 ## Configuration
 
@@ -68,6 +70,9 @@ aria2c_path = "aria2c"
 
 # Number of concurrent downloads
 concurrent_downloads = 5
+
+# Verify parquet file integrity after download
+integrity_check = true
 ```
 
 ### Configuration Options
@@ -78,6 +83,7 @@ concurrent_downloads = 5
 | `download_dir` | `./downloads` | Target directory for downloaded files |
 | `aria2c_path` | `aria2c` | Path to aria2c binary |
 | `concurrent_downloads` | `5` | Number of parallel downloads |
+| `integrity_check` | `true` | Verify parquet file integrity after download |
 
 ## Features
 
@@ -87,6 +93,7 @@ concurrent_downloads = 5
 - **Manifest refresh**: The manifest is re-fetched on each run to detect new files
 - **Progress display**: Real-time download progress via aria2c's console output
 - **Configurable**: All settings can be customized via config file or CLI
+- **Integrity verification**: Validates parquet file metadata and schema after download, with automatic retry for corrupt files
 
 ## How It Works
 
@@ -96,6 +103,7 @@ concurrent_downloads = 5
 4. Filters out files that already exist in the download directory
 5. Generates an aria2c input file with URLs and output filenames
 6. Executes aria2c to download the files with resume capability
+7. Verifies parquet file integrity (if enabled), retrying corrupt files up to 3 times
 
 ## License
 
