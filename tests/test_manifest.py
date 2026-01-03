@@ -3,7 +3,7 @@
 import httpx
 import pytest
 
-from manifest import fetch_manifest, extract_file_paths
+from manifest import fetch_manifest, extract_file_paths, validate_path
 
 
 class TestFetchManifest:
@@ -90,3 +90,64 @@ class TestExtractFilePaths:
         result = extract_file_paths(manifest)
 
         assert result == ["file1.parquet"]
+
+    def test_extract_file_paths_filters_directory_traversal(self):
+        """Filters out paths with directory traversal attempts."""
+        manifest = {
+            "files": {
+                "code": [
+                    "code/file1.parquet",
+                    "../../../etc/passwd",
+                    "code/../secret.parquet",
+                ]
+            }
+        }
+
+        result = extract_file_paths(manifest)
+
+        assert result == ["code/file1.parquet"]
+
+    def test_extract_file_paths_filters_absolute_paths(self):
+        """Filters out absolute paths."""
+        manifest = {
+            "files": {
+                "code": [
+                    "code/file1.parquet",
+                    "/etc/passwd",
+                    "/absolute/path.parquet",
+                ]
+            }
+        }
+
+        result = extract_file_paths(manifest)
+
+        assert result == ["code/file1.parquet"]
+
+
+class TestValidatePath:
+    """Tests for validate_path()."""
+
+    def test_valid_simple_path(self):
+        """Accepts simple relative paths."""
+        assert validate_path("file.parquet") is True
+
+    def test_valid_nested_path(self):
+        """Accepts nested relative paths."""
+        assert validate_path("code/file.parquet") is True
+        assert validate_path("a/b/c/file.parquet") is True
+
+    def test_rejects_parent_directory_traversal(self):
+        """Rejects paths with .. directory traversal."""
+        assert validate_path("../file.parquet") is False
+        assert validate_path("code/../file.parquet") is False
+        assert validate_path("../../../etc/passwd") is False
+
+    def test_rejects_absolute_unix_path(self):
+        """Rejects absolute Unix paths."""
+        assert validate_path("/etc/passwd") is False
+        assert validate_path("/absolute/path.parquet") is False
+
+    def test_rejects_absolute_windows_path(self):
+        """Rejects absolute Windows paths."""
+        assert validate_path("C:\\file.parquet") is False
+        assert validate_path("D:\\path\\file.parquet") is False
