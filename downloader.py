@@ -135,13 +135,19 @@ def verify_parquet_integrity(
             pq.read_metadata(filepath)  # Validate file structure/footer
             pq.read_schema(filepath)  # Validate column definitions
             return (filename, True)
-        except Exception as e:
+        except pq.lib.ArrowInvalid as e:
+            # Parquet file is corrupt - delete and retry
             logger = get_logger()
-            logger.warning("Parquet validation failed for %s: %s", filename, e)
+            logger.warning("Parquet file corrupt %s: %s", filename, e)
             try:
-                filepath.unlink()  # Delete corrupt file
+                filepath.unlink()
             except OSError as unlink_err:
                 logger.debug("Failed to delete corrupt file %s: %s", filename, unlink_err)
+            return (filename, False)
+        except Exception as e:
+            # System error (permissions, memory, etc.) - don't delete, just report
+            logger = get_logger()
+            logger.error("Failed to validate %s (not deleting): %s", filename, e)
             return (filename, False)
 
     def update_progress() -> None:
@@ -219,9 +225,11 @@ def download_files_impl(
     # Run pre-download integrity check if requested (skip in dry-run mode)
     if run_integrity and not dry_run:
         config.download_dir.mkdir(parents=True, exist_ok=True)
+        # Only validate files that are in the manifest (safe to delete and re-download)
+        manifest_filenames = {os.path.basename(p) for p in file_paths}
         existing_files = [
             f.name for f in config.download_dir.glob("*.parquet")
-            if f.is_file()
+            if f.is_file() and f.name in manifest_filenames
         ]
         if existing_files:
             if on_integrity_start:
