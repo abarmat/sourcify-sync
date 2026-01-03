@@ -10,6 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from config import Config
+from logging_setup import get_logger
 
 
 @dataclass
@@ -79,8 +80,9 @@ def load_session_urls(session_file: Path) -> set[str]:
                 line = line.strip()
                 if line and line.startswith("http"):
                     urls.add(line)
-    except OSError:
-        pass
+    except OSError as e:
+        logger = get_logger()
+        logger.debug("Failed to read session file %s: %s", session_file, e)
 
     return urls
 
@@ -133,11 +135,13 @@ def verify_parquet_integrity(
             pq.read_metadata(filepath)  # Validate file structure/footer
             pq.read_schema(filepath)  # Validate column definitions
             return (filename, True)
-        except Exception:
+        except Exception as e:
+            logger = get_logger()
+            logger.warning("Parquet validation failed for %s: %s", filename, e)
             try:
                 filepath.unlink()  # Delete corrupt file
-            except OSError:
-                pass
+            except OSError as unlink_err:
+                logger.debug("Failed to delete corrupt file %s: %s", filename, unlink_err)
             return (filename, False)
 
     def update_progress() -> None:
