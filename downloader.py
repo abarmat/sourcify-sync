@@ -172,12 +172,33 @@ def download_files_impl(
     on_integrity_complete: Callable[[int], None] | None = None,
     max_integrity_retries: int = 3,
     integrity_check: bool = True,
+    run_integrity: bool = False,
 ) -> DownloadResult:
     """Download files using aria2c with robust resume support and integrity checking.
 
     Returns DownloadResult with statistics.
     """
     total_files = len(file_paths)
+
+    # Run pre-download integrity check if requested
+    if run_integrity:
+        config.download_dir.mkdir(parents=True, exist_ok=True)
+        existing_files = [
+            f.name for f in config.download_dir.glob("*.parquet")
+            if f.is_file()
+        ]
+        if existing_files:
+            if on_integrity_start:
+                on_integrity_start(len(existing_files))
+
+            failed = verify_parquet_integrity(
+                config.download_dir,
+                existing_files,
+                on_progress=on_integrity_progress,
+            )
+
+            if on_integrity_complete:
+                on_integrity_complete(len(failed))
 
     if on_verify_start:
         on_verify_start(total_files)
@@ -301,6 +322,7 @@ def download_files(
     on_integrity_progress: Callable[[int, int], None] | None = None,
     on_integrity_complete: Callable[[int], None] | None = None,
     integrity_check: bool = True,
+    run_integrity: bool = False,
 ) -> DownloadResult:
     """Download files, checking local existence to determine what needs downloading."""
     return download_files_impl(
@@ -313,4 +335,5 @@ def download_files(
         on_integrity_progress,
         on_integrity_complete,
         integrity_check=integrity_check,
+        run_integrity=run_integrity,
     )

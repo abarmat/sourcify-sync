@@ -38,6 +38,11 @@ This is a Python CLI tool that downloads files from a remote manifest using aria
 - Base URL is auto-derived from manifest URL
 - Optional parquet integrity check validates metadata/schema and retries corrupt files
 
+## Contributing
+
+- When writing commit messages do it with a brief description. If there are many changes use at most 3 bullets.
+- When creating a PR, do not include any message about attribution. Keep it clean.
+
 ## Requirements
 
 - Python 3.13+
