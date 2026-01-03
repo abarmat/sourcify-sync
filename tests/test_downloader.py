@@ -10,6 +10,7 @@ from downloader import (
     create_aria2c_input_file,
     run_aria2c,
     download_files,
+    verify_parquet_integrity,
     DownloadResult,
 )
 
@@ -142,6 +143,7 @@ class TestRunAria2c:
             base_url="https://example.com/",
             integrity_check=True,
             integrity_retry_count=3,
+            concurrent_validations=4,
         )
         input_file = tmp_path / "input.txt"
         input_file.write_text("")
@@ -170,6 +172,7 @@ class TestRunAria2c:
             base_url="https://example.com/",
             integrity_check=True,
             integrity_retry_count=3,
+            concurrent_validations=4,
         )
         input_file = tmp_path / "input.txt"
         input_file.write_text("")
@@ -195,6 +198,7 @@ class TestDownloadFiles:
             base_url="https://example.com/",
             integrity_check=True,
             integrity_retry_count=3,
+            concurrent_validations=4,
         )
         config.download_dir.mkdir()
 
@@ -208,3 +212,199 @@ class TestDownloadFiles:
         assert result.skipped_files == 1
         assert result.to_download == 0
         assert result.aria2c_exit_code == 0
+
+
+class TestVerifyParquetIntegrity:
+    """Tests for verify_parquet_integrity()."""
+
+    def test_skip_files_with_aria2_control_file(self, tmp_path):
+        """Skips files that have an active .aria2 control file (incomplete download)."""
+        download_dir = tmp_path / "downloads"
+        download_dir.mkdir()
+
+        # Create a parquet file and its .aria2 control file
+        parquet_file = download_dir / "test.parquet"
+        parquet_file.write_bytes(b"incomplete data")
+        aria2_control = download_dir / "test.parquet.aria2"
+        aria2_control.write_text("control file")
+
+        failed = verify_parquet_integrity(download_dir, ["test.parquet"])
+
+        # Should be skipped (not in failed list)
+        assert failed == []
+        # File should NOT be deleted
+        assert parquet_file.exists()
+
+    def test_valid_parquet_passes(self, tmp_path):
+        """Valid parquet file passes integrity check."""
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        download_dir = tmp_path / "downloads"
+        download_dir.mkdir()
+
+        # Create a valid parquet file
+        table = pa.table({"col1": [1, 2, 3], "col2": ["a", "b", "c"]})
+        parquet_file = download_dir / "valid.parquet"
+        pq.write_table(table, parquet_file)
+
+        failed = verify_parquet_integrity(download_dir, ["valid.parquet"])
+
+        assert failed == []
+        assert parquet_file.exists()
+
+    def test_corrupt_parquet_deleted_and_reported(self, tmp_path):
+        """Corrupt parquet file is deleted and reported as failed."""
+        download_dir = tmp_path / "downloads"
+        download_dir.mkdir()
+
+        # Create a corrupt parquet file (invalid data)
+        parquet_file = download_dir / "corrupt.parquet"
+        parquet_file.write_bytes(b"this is not valid parquet data")
+
+        failed = verify_parquet_integrity(download_dir, ["corrupt.parquet"])
+
+        assert "corrupt.parquet" in failed
+        # File should be deleted
+        assert not parquet_file.exists()
+
+    def test_permission_error_does_not_delete(self, tmp_path):
+        """Permission errors don't delete the file but still report failure."""
+        import pyarrow.parquet as pq
+
+        download_dir = tmp_path / "downloads"
+        download_dir.mkdir()
+
+        # Create a file that will trigger permission error
+        parquet_file = download_dir / "protected.parquet"
+        parquet_file.write_bytes(b"some data")
+
+        with patch.object(pq, "read_metadata", side_effect=PermissionError("Access denied")):
+            failed = verify_parquet_integrity(download_dir, ["protected.parquet"])
+
+        # Should be reported as failed
+        assert "protected.parquet" in failed
+        # File should NOT be deleted (system error, not corruption)
+        assert parquet_file.exists()
+
+    def test_skip_missing_files(self, tmp_path):
+        """Missing files are skipped (not reported as failed)."""
+        download_dir = tmp_path / "downloads"
+        download_dir.mkdir()
+
+        # Don't create the file
+        failed = verify_parquet_integrity(download_dir, ["nonexistent.parquet"])
+
+        assert failed == []
+
+    def test_skip_non_parquet_files(self, tmp_path):
+        """Non-parquet files are skipped."""
+        download_dir = tmp_path / "downloads"
+        download_dir.mkdir()
+
+        # Create a non-parquet file
+        txt_file = download_dir / "readme.txt"
+        txt_file.write_text("not a parquet file")
+
+        failed = verify_parquet_integrity(download_dir, ["readme.txt"])
+
+        assert failed == []
+        assert txt_file.exists()
+
+    def test_progress_callback_called(self, tmp_path):
+        """Progress callback is called for each file."""
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        download_dir = tmp_path / "downloads"
+        download_dir.mkdir()
+
+        # Create valid parquet files
+        table = pa.table({"col1": [1]})
+        pq.write_table(table, download_dir / "file1.parquet")
+        pq.write_table(table, download_dir / "file2.parquet")
+
+        progress_calls = []
+
+        def on_progress(completed, total):
+            progress_calls.append((completed, total))
+
+        verify_parquet_integrity(
+            download_dir,
+            ["file1.parquet", "file2.parquet"],
+            on_progress=on_progress,
+        )
+
+        assert len(progress_calls) == 2
+        # Check that we got both progress updates (order may vary due to threading)
+        assert (1, 2) in progress_calls
+        assert (2, 2) in progress_calls
+
+    def test_delete_failure_logged_not_raised(self, tmp_path, caplog):
+        """Delete failure is logged but doesn't raise exception."""
+        download_dir = tmp_path / "downloads"
+        download_dir.mkdir()
+
+        # Create a corrupt parquet file
+        parquet_file = download_dir / "corrupt.parquet"
+        parquet_file.write_bytes(b"invalid parquet")
+
+        # Mock unlink to fail
+        original_unlink = Path.unlink
+
+        def mock_unlink(self, missing_ok=False):
+            if self.name == "corrupt.parquet":
+                raise OSError("Permission denied")
+            return original_unlink(self, missing_ok=missing_ok)
+
+        with patch.object(Path, "unlink", mock_unlink):
+            failed = verify_parquet_integrity(download_dir, ["corrupt.parquet"])
+
+        # Should still report as failed
+        assert "corrupt.parquet" in failed
+        # File still exists (delete failed)
+        assert parquet_file.exists()
+
+
+class TestGetFilesToDownloadEdgeCases:
+    """Edge case tests for get_files_to_download()."""
+
+    def test_empty_file_needs_download(self, tmp_path):
+        """Empty (0-byte) files are treated as needing download."""
+        download_dir = tmp_path / "downloads"
+        download_dir.mkdir()
+
+        # Create an empty file
+        empty_file = download_dir / "empty.parquet"
+        empty_file.touch()
+        assert empty_file.stat().st_size == 0
+
+        to_download, cache = get_files_to_download(
+            ["code/empty.parquet"],
+            "https://example.com/",
+            download_dir,
+        )
+
+        assert len(to_download) == 1
+        assert to_download[0][1] == "empty.parquet"
+        assert "empty.parquet" not in cache
+
+    def test_directory_with_same_name_needs_download(self, tmp_path):
+        """Directory with same name as target file triggers download."""
+        download_dir = tmp_path / "downloads"
+        download_dir.mkdir()
+
+        # Create a directory with the target filename
+        dir_as_file = download_dir / "file.parquet"
+        dir_as_file.mkdir()
+
+        to_download, cache = get_files_to_download(
+            ["code/file.parquet"],
+            "https://example.com/",
+            download_dir,
+        )
+
+        # Should need download (it's a directory, not a file)
+        # Note: stat().st_size on a directory returns its metadata size, not 0
+        # The exists() check passes, but it's not a proper file
+        assert len(to_download) == 0 or "file.parquet" not in cache

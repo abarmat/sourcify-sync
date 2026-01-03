@@ -119,6 +119,7 @@ def verify_parquet_integrity(
     Returns list of filenames that failed validation (corrupt files are deleted).
     """
     import pyarrow.parquet as pq
+    from pyarrow import ArrowInvalid
 
     failed: list[str] = []
     failed_lock = threading.Lock()
@@ -131,11 +132,15 @@ def verify_parquet_integrity(
         filepath = download_dir / filename
         if not filepath.exists() or filepath.suffix != ".parquet":
             return (filename, True)  # Skip non-parquet or missing files
+        # Skip files with active aria2 control files (incomplete downloads)
+        aria2_control = filepath.with_suffix(filepath.suffix + ".aria2")
+        if aria2_control.exists():
+            return (filename, True)  # Skip - download still in progress
         try:
             pq.read_metadata(filepath)  # Validate file structure/footer
             pq.read_schema(filepath)  # Validate column definitions
             return (filename, True)
-        except pq.lib.ArrowInvalid as e:
+        except ArrowInvalid as e:
             # Parquet file is corrupt - delete and retry
             logger = get_logger()
             logger.warning("Parquet file corrupt %s: %s", filename, e)

@@ -40,6 +40,7 @@ def sample_config(tmp_path):
         base_url="https://example.com/",
         integrity_check=True,
         integrity_retry_count=3,
+        concurrent_validations=4,
     )
 
 

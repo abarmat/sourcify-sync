@@ -24,7 +24,16 @@ uv run python main.py -q
 uv run python main.py --log-file sync.log
 
 # Check syntax
-uv run python -m py_compile main.py config.py manifest.py downloader.py logging_setup.py
+just check
+
+# Run tests
+just test
+
+# Run tests with verbose output
+just test-v
+
+# Run tests and stop on first failure
+just test-x
 ```
 
 ## Architecture
@@ -56,4 +65,5 @@ This is a Python CLI tool that downloads files from a remote manifest using aria
 ## Requirements
 
 - Python 3.13+
-- aria2c (external binary, install via `brew install aria2` or `apt install aria2`)
+- aria2c (install via `brew install aria2` or `apt install aria2`)
+- just (install via `brew install just` or `cargo install just`)
