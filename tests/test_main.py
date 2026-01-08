@@ -102,7 +102,7 @@ class TestMain:
 
         assert exit_code == 0
 
-    def test_returns_one_on_manifest_fetch_error(self, tmp_path, caplog):
+    def test_returns_one_on_manifest_fetch_error(self, tmp_path, capsys):
         """Returns 1 exit code when manifest fetch fails."""
         with patch.object(sys, "argv", ["main.py"]), \
              patch("main.Config.load") as mock_config, \
@@ -115,8 +115,8 @@ class TestMain:
             )
             mock_fetch.side_effect = Exception("Network error")
 
-            with caplog.at_level(logging.ERROR):
-                exit_code = main()
+            exit_code = main()
 
         assert exit_code == 1
-        assert "Error fetching manifest" in caplog.text
+        captured = capsys.readouterr()
+        assert "Error fetching manifest" in captured.out

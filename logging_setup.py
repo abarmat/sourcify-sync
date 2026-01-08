@@ -4,6 +4,11 @@ import logging
 import sys
 from pathlib import Path
 
+from rich.console import Console
+
+# Global console instance for rich output
+_console = Console()
+
 
 def setup_logging(
     verbosity: int = 0,
@@ -60,11 +65,6 @@ def get_logger() -> logging.Logger:
     return logging.getLogger("sourcify_sync")
 
 
-def write_progress(message: str) -> None:
-    """Write a progress bar update directly to terminal.
-
-    This bypasses logging entirely for progress updates that use
-    carriage return for in-place updates.
-    """
-    sys.stdout.write(f"\r{message}")
-    sys.stdout.flush()
+def get_console() -> Console:
+    """Get the rich console instance for styled output."""
+    return _console

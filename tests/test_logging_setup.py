@@ -1,10 +1,10 @@
 """Tests for logging_setup module."""
 
 import logging
-from io import StringIO
 
-import pytest
-from logging_setup import setup_logging, get_logger, write_progress
+from rich.console import Console
+
+from logging_setup import setup_logging, get_logger, get_console
 
 
 class TestSetupLogging:
@@ -56,12 +56,16 @@ class TestGetLogger:
         assert logger.name == "sourcify_sync"
 
 
-class TestWriteProgress:
-    """Tests for write_progress()."""
+class TestGetConsole:
+    """Tests for get_console()."""
 
-    def test_writes_with_carriage_return(self, monkeypatch):
-        """write_progress outputs with carriage return prefix."""
-        output = StringIO()
-        monkeypatch.setattr("sys.stdout", output)
-        write_progress("Test progress")
-        assert output.getvalue() == "\rTest progress"
+    def test_returns_console_instance(self):
+        """Returns a rich Console instance."""
+        console = get_console()
+        assert isinstance(console, Console)
+
+    def test_returns_same_instance(self):
+        """Returns the same console instance on multiple calls."""
+        console1 = get_console()
+        console2 = get_console()
+        assert console1 is console2

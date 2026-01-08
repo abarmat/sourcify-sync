@@ -4,9 +4,13 @@ import argparse
 import sys
 from pathlib import Path
 
+from rich.panel import Panel
+from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
+from rich.table import Table
+
 from config import Config
 from downloader import download_files
-from logging_setup import get_logger, setup_logging, write_progress
+from logging_setup import get_console, get_logger, setup_logging
 from manifest import extract_file_paths, fetch_manifest
 
 
@@ -93,6 +97,8 @@ def main() -> int:
     setup_logging(verbosity=verbosity, log_file=args.log_file)
     logger = get_logger()
 
+    console = get_console()
+
     logger.debug("Loading configuration...")
     config = Config.load(
         config_path=args.config,
@@ -103,62 +109,80 @@ def main() -> int:
         concurrent_validations_override=args.concurrent_validations,
     )
 
-    logger.info("Manifest URL: %s", config.manifest_url)
-    logger.info("Download directory: %s", config.download_dir)
-    logger.info("Concurrent downloads: %s", config.concurrent_downloads)
-    logger.info("Integrity check: %s", "enabled" if config.integrity_check else "disabled")
-    logger.info("Integrity retries: %s", config.integrity_retry_count)
-    logger.info("Concurrent validations: %s", config.concurrent_validations)
+    # Display configuration in a styled panel
+    config_table = Table(show_header=False, box=None, padding=(0, 1))
+    config_table.add_column("Setting", style="dim")
+    config_table.add_column("Value")
+    config_table.add_row("Manifest URL", config.manifest_url)
+    config_table.add_row("Download directory", str(config.download_dir))
+    config_table.add_row("Concurrent downloads", str(config.concurrent_downloads))
+    config_table.add_row("Integrity check", "[green]enabled[/]" if config.integrity_check else "[dim]disabled[/]")
+    config_table.add_row("Integrity retries", str(config.integrity_retry_count))
+    config_table.add_row("Concurrent validations", str(config.concurrent_validations))
     if args.run_integrity:
-        logger.info("Pre-download integrity check: enabled")
+        config_table.add_row("Pre-download integrity", "[green]enabled[/]")
+
+    console.print(Panel(config_table, title="Configuration", border_style="blue"))
+
     if args.dry_run:
-        logger.info("")
-        logger.info("DRY RUN MODE - no files will be downloaded")
-        logger.info("")
+        console.print()
+        console.print("[yellow]DRY RUN MODE[/] - no files will be downloaded")
+        console.print()
 
     logger.debug("Fetching manifest...")
     try:
         manifest = fetch_manifest(config.manifest_url)
     except Exception as e:
-        logger.error("Error fetching manifest: %s", e)
+        console.print(f"[red]Error fetching manifest:[/] {e}")
         return 1
 
     file_paths = extract_file_paths(manifest)
-    logger.info("Found %d files in manifest", len(file_paths))
+    console.print(f"Found [cyan]{len(file_paths)}[/] files in manifest")
+
+    # Progress bar state for callbacks
+    progress_state: dict = {"progress": None, "task": None}
+
+    def make_progress() -> Progress:
+        return Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TextColumn("{task.completed}/{task.total}"),
+            console=console,
+        )
 
     def on_verify_start(total: int) -> None:
         logger.debug("Verifying files...")
+        progress_state["progress"] = make_progress()
+        progress_state["progress"].start()
+        progress_state["task"] = progress_state["progress"].add_task("Verifying", total=total)
 
     def on_verify_progress(completed: int, total: int) -> None:
-        percent = completed / total
-        bar_width = 40
-        filled = int(bar_width * percent)
-        bar = "█" * filled + "░" * (bar_width - filled)
-        write_progress(f"Verifying: [{bar}] {completed}/{total}")
+        progress_state["progress"].update(progress_state["task"], completed=completed)
 
     def on_verify_complete(to_download: int) -> None:
-        print()  # Newline after progress bar
-        logger.info("Found %d files to download", to_download)
+        progress_state["progress"].stop()
+        console.print(f"Found [cyan]{to_download}[/] files to download")
         if to_download > 0 and not args.dry_run:
-            logger.info("Starting download...")
+            console.print("[dim]Starting download...[/]")
 
     def on_integrity_start(total: int) -> None:
-        print()  # Newline before integrity check
+        console.print()
         logger.debug("Verifying parquet file integrity...")
+        progress_state["progress"] = make_progress()
+        progress_state["progress"].start()
+        progress_state["task"] = progress_state["progress"].add_task("Integrity check", total=total)
 
     def on_integrity_progress(completed: int, total: int) -> None:
-        percent = completed / total
-        bar_width = 40
-        filled = int(bar_width * percent)
-        bar = "█" * filled + "░" * (bar_width - filled)
-        write_progress(f"Integrity: [{bar}] {completed}/{total}")
+        progress_state["progress"].update(progress_state["task"], completed=completed)
 
     def on_integrity_complete(failed: int) -> None:
-        print()  # Newline after progress bar
+        progress_state["progress"].stop()
         if failed > 0:
-            logger.warning("Found %d corrupt files, re-downloading...", failed)
+            console.print(f"[yellow]Found {failed} corrupt files, re-downloading...[/]")
         else:
-            logger.info("All files passed integrity check")
+            console.print("[green]All files passed integrity check[/]")
 
     result = download_files(
         config,
@@ -175,38 +199,43 @@ def main() -> int:
         dry_run=args.dry_run,
     )
 
-    logger.info("")
-    logger.info("=" * 50)
+    # Build summary table
+    console.print()
+    summary_title = "Dry Run Summary" if args.dry_run else "Download Summary"
+    summary_table = Table(title=summary_title, show_header=False)
+    summary_table.add_column("Metric", style="dim")
+    summary_table.add_column("Value", justify="right")
+
+    summary_table.add_row("Total files in manifest", str(result.total_files))
+    summary_table.add_row("Already complete", str(result.skipped_files))
     if args.dry_run:
-        logger.info("Dry Run Summary")
+        summary_table.add_row("Would download", str(result.to_download))
     else:
-        logger.info("Download Summary")
-    logger.info("=" * 50)
-    logger.info("Total files in manifest: %d", result.total_files)
-    logger.info("Already complete: %d", result.skipped_files)
-    if args.dry_run:
-        logger.info("Would download: %d", result.to_download)
-    else:
-        logger.info("Downloaded/resumed: %d", result.to_download)
+        summary_table.add_row("Downloaded/resumed", str(result.to_download))
 
     if not args.dry_run:
         if result.integrity_retries > 0:
-            logger.info("Integrity retries: %d", result.integrity_retries)
+            summary_table.add_row("Integrity retries", str(result.integrity_retries))
 
         if result.integrity_failures > 0:
-            logger.warning("Integrity failures: %d", result.integrity_failures)
-            logger.warning("Some files failed integrity checks after max retries.")
+            summary_table.add_row("Integrity failures", f"[red]{result.integrity_failures}[/]")
+
+    console.print(summary_table)
+
+    if not args.dry_run:
+        if result.integrity_failures > 0:
+            console.print("[yellow]Some files failed integrity checks after max retries.[/]")
 
         if result.aria2c_exit_code != 0:
-            logger.warning("aria2c exit code: %d", result.aria2c_exit_code)
-            logger.info("Note: Session saved. Run again to resume incomplete downloads.")
+            console.print(f"[yellow]aria2c exit code: {result.aria2c_exit_code}[/]")
+            console.print("[dim]Session saved. Run again to resume incomplete downloads.[/]")
             return result.aria2c_exit_code
 
         if result.integrity_failures > 0:
-            logger.warning("Sync completed with errors.")
+            console.print("[yellow]Sync completed with errors.[/]")
             return 1
 
-        logger.info("All files synced successfully!")
+        console.print("[green]All files synced successfully![/]")
 
     return 0
 
