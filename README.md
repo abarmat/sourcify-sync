@@ -53,6 +53,13 @@ uv run python main.py -c /path/to/config.toml
 | `-d, --download-dir` | Override download directory from config |
 | `-m, --manifest-url` | Override manifest URL from config |
 | `-j, --concurrency` | Number of concurrent downloads |
+| `-r, --run-integrity` | Run integrity check on existing files before downloading |
+| `-i, --integrity-retries` | Number of times to retry downloading files that fail integrity checks |
+| `--concurrent-validations` | Number of concurrent parquet validations (default: CPU count) |
+| `-n, --dry-run` | Preview what would be downloaded without downloading |
+| `-v, --verbose` | Enable verbose output (DEBUG level) |
+| `-q, --quiet` | Quiet mode (only warnings and errors) |
+| `--log-file` | Write logs to file (always DEBUG level) |
 
 ## Configuration
 
@@ -73,6 +80,9 @@ concurrent_downloads = 5
 
 # Verify parquet file integrity after download
 integrity_check = true
+
+# Number of times to retry downloading files that fail integrity checks
+integrity_retry_count = 3
 ```
 
 ### Configuration Options
@@ -84,6 +94,7 @@ integrity_check = true
 | `aria2c_path` | `aria2c` | Path to aria2c binary |
 | `concurrent_downloads` | `5` | Number of parallel downloads |
 | `integrity_check` | `true` | Verify parquet file integrity after download |
+| `integrity_retry_count` | `3` | Number of retries for corrupt file downloads |
 
 ## Features
 

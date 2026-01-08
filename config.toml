@@ -17,3 +17,6 @@ integrity_check = true
 
 # Number of times to retry downloading files that fail integrity checks
 integrity_retry_count = 3
+
+# Number of concurrent parquet validations (default: CPU count)
+# concurrent_validations = 4

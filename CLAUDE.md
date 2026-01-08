@@ -23,6 +23,12 @@ uv run python main.py -q
 # Log to file
 uv run python main.py --log-file sync.log
 
+# Preview what would be downloaded (dry run)
+uv run python main.py -n
+
+# Run integrity check on existing files
+uv run python main.py -r
+
 # Check syntax
 just check
 
