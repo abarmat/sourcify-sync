@@ -17,7 +17,7 @@ DEFAULTS = {
     "integrity_check": True,
     "integrity_retry_count": 3,
     "concurrent_validations": None,  # None = os.cpu_count() or 4
-    "format_version": "v1",  # "v1" (JSON manifest) or "v2" (XML listing)
+    "format_version": "v2",  # "v1" (JSON manifest) or "v2" (XML listing)
     "v2_listing_url": "https://export.sourcify.dev/",
     "v2_prefix": "v2/",
 }

@@ -20,3 +20,12 @@ integrity_retry_count = 3
 
 # Number of concurrent parquet validations (default: CPU count)
 # concurrent_validations = 4
+
+# Format version: "v1" (JSON manifest) or "v2" (XML listing with checksums)
+# - v1: Uses manifest.json, trusts file existence for completeness
+# - v2: Uses GCP XML listing, checksum-based incremental sync
+format_version = "v2"
+
+# V2-specific settings (only used when format_version = "v2")
+# v2_listing_url = "https://export.sourcify.dev/"
+# v2_prefix = "v2/"
