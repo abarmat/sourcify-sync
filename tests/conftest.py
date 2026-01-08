@@ -41,6 +41,9 @@ def sample_config(tmp_path):
         integrity_check=True,
         integrity_retry_count=3,
         concurrent_validations=4,
+        format_version="v1",
+        v2_listing_url="https://example.com/",
+        v2_prefix="v2/",
     )
 
 

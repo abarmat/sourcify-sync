@@ -9,9 +9,10 @@ from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn
 from rich.table import Table
 
 from config import Config
-from downloader import download_files
+from downloader import download_files, download_files_v2
 from logging_setup import get_console, get_logger, setup_logging
 from manifest import extract_file_paths, fetch_manifest
+from manifest_v2 import fetch_v2_listing
 
 
 def parse_args() -> argparse.Namespace:
@@ -65,6 +66,13 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Preview what would be downloaded without downloading",
     )
+    parser.add_argument(
+        "-f", "--format",
+        type=str,
+        choices=["v1", "v2"],
+        default=None,
+        help="Format version: v1 (JSON manifest) or v2 (XML listing with checksums)",
+    )
 
     # Logging verbosity (mutually exclusive)
     verbosity_group = parser.add_mutually_exclusive_group()
@@ -107,18 +115,26 @@ def main() -> int:
         concurrency_override=args.concurrency,
         integrity_retry_count_override=args.integrity_retries,
         concurrent_validations_override=args.concurrent_validations,
+        format_version_override=args.format,
     )
 
     # Display configuration in a styled panel
     config_table = Table(show_header=False, box=None, padding=(0, 1))
     config_table.add_column("Setting", style="dim")
     config_table.add_column("Value")
+    config_table.add_row("Format version", config.format_version)
+    if config.format_version == "v1":
+        config_table.add_row("Manifest URL", config.manifest_url)
+    else:
+        config_table.add_row("Listing URL", config.v2_listing_url)
+        config_table.add_row("Prefix", config.v2_prefix)
     config_table.add_row("Manifest URL", config.manifest_url)
     config_table.add_row("Download directory", str(config.download_dir))
     config_table.add_row("Concurrent downloads", str(config.concurrent_downloads))
     config_table.add_row("Integrity check", "[green]enabled[/]" if config.integrity_check else "[dim]disabled[/]")
     config_table.add_row("Integrity retries", str(config.integrity_retry_count))
     config_table.add_row("Concurrent validations", str(config.concurrent_validations))
+
     if args.run_integrity:
         config_table.add_row("Pre-download integrity", "[green]enabled[/]")
 
@@ -128,16 +144,6 @@ def main() -> int:
         console.print()
         console.print("[yellow]DRY RUN MODE[/] - no files will be downloaded")
         console.print()
-
-    logger.debug("Fetching manifest...")
-    try:
-        manifest = fetch_manifest(config.manifest_url)
-    except Exception as e:
-        console.print(f"[red]Error fetching manifest:[/] {e}")
-        return 1
-
-    file_paths = extract_file_paths(manifest)
-    console.print(f"Found [cyan]{len(file_paths)}[/] files in manifest")
 
     # Progress bar state for callbacks
     progress_state: dict = {"progress": None, "task": None}
@@ -152,6 +158,7 @@ def main() -> int:
             console=console,
         )
 
+    # Define progress callbacks
     def on_verify_start(total: int) -> None:
         logger.debug("Verifying files...")
         progress_state["progress"] = make_progress()
@@ -184,20 +191,65 @@ def main() -> int:
         else:
             console.print("[green]All files passed integrity check[/]")
 
-    result = download_files(
-        config,
-        file_paths,
-        on_verify_start=on_verify_start,
-        on_verify_progress=on_verify_progress,
-        on_verify_complete=on_verify_complete,
-        on_integrity_start=on_integrity_start,
-        on_integrity_progress=on_integrity_progress,
-        on_integrity_complete=on_integrity_complete,
-        integrity_check=config.integrity_check,
-        run_integrity=args.run_integrity,
-        max_integrity_retries=config.integrity_retry_count,
-        dry_run=args.dry_run,
-    )
+    # Branch on format version
+    if config.format_version == "v1":
+        console.print("Fetching manifest...")
+        try:
+            manifest = fetch_manifest(config.manifest_url)
+        except Exception as e:
+            console.print(f"[red]Error fetching manifest:[/] {e}")
+            return 1
+
+        file_paths = extract_file_paths(manifest)
+        console.print(f"Found [cyan]{len(file_paths)}[/] files in manifest")
+
+        result = download_files(
+            config,
+            file_paths,
+            on_verify_start=on_verify_start,
+            on_verify_progress=on_verify_progress,
+            on_verify_complete=on_verify_complete,
+            on_integrity_start=on_integrity_start,
+            on_integrity_progress=on_integrity_progress,
+            on_integrity_complete=on_integrity_complete,
+            integrity_check=config.integrity_check,
+            run_integrity=args.run_integrity,
+            max_integrity_retries=config.integrity_retry_count,
+            dry_run=args.dry_run,
+        )
+    else:
+        # v2 format
+        console.print("Fetching file listing...")
+
+        def on_page_fetched(page: int, total_files: int) -> None:
+            logger.debug("Fetched page %d (%d files so far)", page, total_files)
+
+        try:
+            file_infos = fetch_v2_listing(
+                config.v2_listing_url,
+                config.v2_prefix,
+                on_page_fetched=on_page_fetched,
+            )
+        except Exception as e:
+            console.print(f"[red]Error fetching file listing:[/] {e}")
+            return 1
+
+        console.print(f"Found [cyan]{len(file_infos)}[/] files in listing")
+
+        result = download_files_v2(
+            config,
+            file_infos,
+            on_verify_start=on_verify_start,
+            on_verify_progress=on_verify_progress,
+            on_verify_complete=on_verify_complete,
+            on_integrity_start=on_integrity_start,
+            on_integrity_progress=on_integrity_progress,
+            on_integrity_complete=on_integrity_complete,
+            integrity_check=config.integrity_check,
+            run_integrity=args.run_integrity,
+            max_integrity_retries=config.integrity_retry_count,
+            dry_run=args.dry_run,
+        )
 
     # Build summary table
     console.print()

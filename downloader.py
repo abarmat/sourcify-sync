@@ -1,5 +1,6 @@
 """aria2c-based downloader for sourcify-sync with robust resume support."""
 
+import hashlib
 import os
 import subprocess
 import tempfile
@@ -10,6 +11,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from config import Config
+from file_info import FileInfo
 from logging_setup import get_logger
 
 
@@ -62,6 +64,77 @@ def get_files_to_download(
             on_progress(i + 1, total)
 
     return to_download, updated_cache
+
+
+def compute_file_md5(filepath: Path) -> str:
+    """Compute MD5 hash of a file (for ETag comparison)."""
+    hasher = hashlib.md5()
+    with open(filepath, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def verify_file_checksum(download_dir: Path, file_info: FileInfo) -> bool:
+    """Verify file matches expected ETag (MD5 checksum).
+
+    Returns True if checksum matches or no checksum available.
+    """
+    if not file_info.has_checksum:
+        return True
+
+    filepath = download_dir / file_info.filename
+    if not filepath.exists():
+        return False
+
+    actual_md5 = compute_file_md5(filepath)
+    return actual_md5 == file_info.etag
+
+
+def get_files_to_download_v2(
+    file_infos: list[FileInfo],
+    base_url: str,
+    download_dir: Path,
+    on_progress: Callable[[int, int], None] | None = None,
+) -> tuple[list[tuple[str, str, FileInfo]], int]:
+    """Determine which v2 files need downloading using checksums.
+
+    Returns:
+        - List of (url, filename, file_info) for files needing download
+        - Count of files skipped (already up-to-date)
+    """
+    to_download: list[tuple[str, str, FileInfo]] = []
+    skipped = 0
+    total = len(file_infos)
+    logger = get_logger()
+
+    for i, info in enumerate(file_infos):
+        local_path = download_dir / info.filename
+
+        # Check if file exists and matches checksum
+        if local_path.exists() and local_path.stat().st_size > 0:
+            if info.has_checksum:
+                if verify_file_checksum(download_dir, info):
+                    skipped += 1
+                    if on_progress:
+                        on_progress(i + 1, total)
+                    continue
+                # Checksum mismatch - need to re-download
+                logger.debug("Checksum mismatch for %s, will re-download", info.filename)
+            else:
+                # No checksum, trust existing file (v1 behavior)
+                skipped += 1
+                if on_progress:
+                    on_progress(i + 1, total)
+                continue
+
+        url = f"{base_url}{info.key}"
+        to_download.append((url, info.filename, info))
+
+        if on_progress:
+            on_progress(i + 1, total)
+
+    return to_download, skipped
 
 
 def load_session_urls(session_file: Path) -> set[str]:
@@ -187,7 +260,7 @@ def run_aria2c(
 
     Returns aria2c exit code.
     """
-    config.download_dir.mkdir(parents=True, exist_ok=True)
+    config.download_subdir.mkdir(parents=True, exist_ok=True)
 
     cmd = [
         config.aria2c_path,
@@ -195,7 +268,7 @@ def run_aria2c(
         f"--save-session={config.session_file}",  # Save state on exit
         "--save-session-interval=10",  # Save every 10 seconds
         f"-j{config.concurrent_downloads}",  # Concurrent downloads
-        f"-d{config.download_dir}",  # Download directory
+        f"-d{config.download_subdir}",  # Download directory (v1/ or v2/)
         "--auto-file-renaming=false",  # Don't rename on conflict
         "--console-log-level=notice",  # Show progress
         "--summary-interval=5",  # Summary every 5 seconds
@@ -229,11 +302,11 @@ def download_files_impl(
 
     # Run pre-download integrity check if requested (skip in dry-run mode)
     if run_integrity and not dry_run:
-        config.download_dir.mkdir(parents=True, exist_ok=True)
+        config.download_subdir.mkdir(parents=True, exist_ok=True)
         # Only validate files that are in the manifest (safe to delete and re-download)
         manifest_filenames = {os.path.basename(p) for p in file_paths}
         existing_files = [
-            f.name for f in config.download_dir.glob("*.parquet")
+            f.name for f in config.download_subdir.glob("*.parquet")
             if f.is_file() and f.name in manifest_filenames
         ]
         if existing_files:
@@ -241,7 +314,7 @@ def download_files_impl(
                 on_integrity_start(len(existing_files))
 
             failed = verify_parquet_integrity(
-                config.download_dir,
+                config.download_subdir,
                 existing_files,
                 on_progress=on_integrity_progress,
                 max_workers=config.concurrent_validations,
@@ -257,7 +330,7 @@ def download_files_impl(
     files_to_download, _ = get_files_to_download(
         file_paths,
         config.base_url,
-        config.download_dir,
+        config.download_subdir,
         on_progress=on_verify_progress,
     )
 
@@ -331,7 +404,7 @@ def download_files_impl(
             on_integrity_start(len(downloaded_filenames))
 
         failed_files = verify_parquet_integrity(
-            config.download_dir,
+            config.download_subdir,
             downloaded_filenames,
             on_progress=on_integrity_progress,
             max_workers=config.concurrent_validations,
@@ -400,4 +473,187 @@ def download_files(
         integrity_check=integrity_check,
         run_integrity=run_integrity,
         dry_run=dry_run,
+    )
+
+
+def download_files_v2(
+    config: Config,
+    file_infos: list[FileInfo],
+    on_verify_start: Callable[[int], None] | None = None,
+    on_verify_progress: Callable[[int, int], None] | None = None,
+    on_verify_complete: Callable[[int], None] | None = None,
+    on_integrity_start: Callable[[int], None] | None = None,
+    on_integrity_progress: Callable[[int, int], None] | None = None,
+    on_integrity_complete: Callable[[int], None] | None = None,
+    integrity_check: bool = True,
+    run_integrity: bool = False,
+    max_integrity_retries: int = 3,
+    dry_run: bool = False,
+) -> DownloadResult:
+    """Download v2 files using checksum-based incremental sync.
+
+    Uses ETag (MD5) checksums to determine which files need downloading.
+    Only downloads files that are missing or have changed.
+    """
+    total_files = len(file_infos)
+    logger = get_logger()
+
+    # Run pre-download integrity check if requested (skip in dry-run mode)
+    if run_integrity and not dry_run:
+        config.download_subdir.mkdir(parents=True, exist_ok=True)
+        # Only validate files that are in the listing (safe to delete and re-download)
+        listing_filenames = {info.filename for info in file_infos}
+        existing_files = [
+            f.name for f in config.download_subdir.glob("*.parquet")
+            if f.is_file() and f.name in listing_filenames
+        ]
+        if existing_files:
+            if on_integrity_start:
+                on_integrity_start(len(existing_files))
+
+            failed = verify_parquet_integrity(
+                config.download_subdir,
+                existing_files,
+                on_progress=on_integrity_progress,
+                max_workers=config.concurrent_validations,
+            )
+
+            if on_integrity_complete:
+                on_integrity_complete(len(failed))
+
+    if on_verify_start:
+        on_verify_start(total_files)
+
+    # Get files that need downloading using checksum comparison
+    files_to_download_v2, skipped_count = get_files_to_download_v2(
+        file_infos,
+        config.v2_listing_url,
+        config.download_subdir,
+        on_progress=on_verify_progress,
+    )
+
+    # Convert to format expected by aria2c input file
+    files_to_download: list[tuple[str, str]] = [
+        (url, filename) for url, filename, _ in files_to_download_v2
+    ]
+
+    # Build file_info lookup for checksum verification
+    file_info_by_filename: dict[str, FileInfo] = {
+        info.filename: info for info in file_infos
+    }
+
+    # Load any incomplete downloads from previous session
+    session_urls = load_session_urls(config.session_file)
+
+    # Add session URLs that aren't already in our list
+    existing_urls = {url for url, _ in files_to_download}
+    for session_url in session_urls:
+        if session_url not in existing_urls:
+            filename = os.path.basename(session_url)
+            files_to_download.append((session_url, filename))
+
+    if on_verify_complete:
+        on_verify_complete(len(files_to_download))
+
+    skipped_files = skipped_count
+    initial_to_download = len(files_to_download)
+
+    if not files_to_download:
+        if config.session_file.exists():
+            config.session_file.unlink()
+
+        return DownloadResult(
+            total_files=total_files,
+            skipped_files=skipped_files,
+            to_download=0,
+            aria2c_exit_code=0,
+        )
+
+    # Dry run: return without downloading
+    if dry_run:
+        return DownloadResult(
+            total_files=total_files,
+            skipped_files=skipped_files,
+            to_download=initial_to_download,
+            aria2c_exit_code=0,
+        )
+
+    # Build URL lookup for re-downloads
+    url_by_filename: dict[str, str] = {
+        filename: url for url, filename in files_to_download
+    }
+
+    exit_code = 0
+    integrity_retries = 0
+    permanent_failures: list[str] = []
+
+    while files_to_download:
+        input_file = create_aria2c_input_file(files_to_download)
+
+        try:
+            exit_code = run_aria2c(config, input_file)
+        finally:
+            input_file.unlink(missing_ok=True)
+
+        if exit_code != 0:
+            break
+
+        if not integrity_check:
+            break
+
+        # Run integrity check on downloaded files
+        downloaded_filenames = [filename for _, filename in files_to_download]
+
+        if on_integrity_start:
+            on_integrity_start(len(downloaded_filenames))
+
+        failed_files = verify_parquet_integrity(
+            config.download_subdir,
+            downloaded_filenames,
+            on_progress=on_integrity_progress,
+            max_workers=config.concurrent_validations,
+        )
+
+        # Also verify checksums for v2 files
+        for filename in downloaded_filenames:
+            if filename in failed_files:
+                continue  # Already marked as failed
+            if filename in file_info_by_filename:
+                info = file_info_by_filename[filename]
+                if info.has_checksum and not verify_file_checksum(config.download_subdir, info):
+                    logger.warning("Checksum verification failed for %s", filename)
+                    # Delete file for re-download
+                    filepath = config.download_subdir / filename
+                    if filepath.exists():
+                        filepath.unlink()
+                    failed_files.append(filename)
+
+        if on_integrity_complete:
+            on_integrity_complete(len(failed_files))
+
+        if not failed_files:
+            break
+
+        integrity_retries += 1
+
+        if integrity_retries >= max_integrity_retries:
+            permanent_failures.extend(failed_files)
+            break
+
+        files_to_download = [
+            (url_by_filename[filename], filename)
+            for filename in failed_files
+            if filename in url_by_filename
+        ]
+
+    if exit_code == 0 and config.session_file.exists():
+        config.session_file.unlink()
+
+    return DownloadResult(
+        total_files=total_files,
+        skipped_files=skipped_files,
+        to_download=initial_to_download,
+        aria2c_exit_code=exit_code,
+        integrity_failures=len(permanent_failures),
+        integrity_retries=integrity_retries,
     )

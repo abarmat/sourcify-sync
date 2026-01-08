@@ -87,7 +87,12 @@ class TestMain:
             mock_config.return_value = MagicMock(
                 manifest_url="https://example.com/manifest.json",
                 download_dir=tmp_path / "downloads",
+                download_subdir=tmp_path / "downloads" / "v1",
                 concurrent_downloads=5,
+                format_version="v1",
+                integrity_check=True,
+                integrity_retry_count=3,
+                concurrent_validations=4,
             )
             mock_fetch.return_value = {"files": {}}
             mock_extract.return_value = []
@@ -111,7 +116,12 @@ class TestMain:
             mock_config.return_value = MagicMock(
                 manifest_url="https://example.com/manifest.json",
                 download_dir=tmp_path / "downloads",
+                download_subdir=tmp_path / "downloads" / "v1",
                 concurrent_downloads=5,
+                format_version="v1",
+                integrity_check=True,
+                integrity_retry_count=3,
+                concurrent_validations=4,
             )
             mock_fetch.side_effect = Exception("Network error")
 

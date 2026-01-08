@@ -1,10 +1,10 @@
 """Manifest fetching and parsing for sourcify-sync."""
 
-import logging
-
 import httpx
 
-logger = logging.getLogger(__name__)
+from logging_setup import get_logger
+
+logger = get_logger()
 
 
 def validate_path(path: str) -> bool:

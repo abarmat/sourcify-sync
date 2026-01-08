@@ -89,6 +89,6 @@ class TestConfigProperties:
     """Tests for Config properties."""
 
     def test_session_file_property(self, sample_config):
-        """session_file returns correct path."""
-        expected = sample_config.download_dir / ".aria2c-session"
+        """session_file returns correct path in download_subdir."""
+        expected = sample_config.download_subdir / ".aria2c-session"
         assert sample_config.session_file == expected

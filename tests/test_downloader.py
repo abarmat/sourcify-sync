@@ -144,6 +144,9 @@ class TestRunAria2c:
             integrity_check=True,
             integrity_retry_count=3,
             concurrent_validations=4,
+            format_version="v1",
+            v2_listing_url="https://example.com/",
+            v2_prefix="v2/",
         )
         input_file = tmp_path / "input.txt"
         input_file.write_text("")
@@ -158,7 +161,7 @@ class TestRunAria2c:
             assert cmd[0] == "/usr/bin/aria2c"
             assert "-c" in cmd
             assert "-j10" in cmd
-            assert f"-d{config.download_dir}" in cmd
+            assert f"-d{config.download_subdir}" in cmd
             assert f"-i{input_file}" in cmd
             assert exit_code == 0
 
@@ -173,6 +176,9 @@ class TestRunAria2c:
             integrity_check=True,
             integrity_retry_count=3,
             concurrent_validations=4,
+            format_version="v1",
+            v2_listing_url="https://example.com/",
+            v2_prefix="v2/",
         )
         input_file = tmp_path / "input.txt"
         input_file.write_text("")
@@ -182,7 +188,7 @@ class TestRunAria2c:
 
             run_aria2c(config, input_file)
 
-            assert config.download_dir.exists()
+            assert config.download_subdir.exists()
 
 
 class TestDownloadFiles:
@@ -199,11 +205,14 @@ class TestDownloadFiles:
             integrity_check=True,
             integrity_retry_count=3,
             concurrent_validations=4,
+            format_version="v1",
+            v2_listing_url="https://example.com/",
+            v2_prefix="v2/",
         )
-        config.download_dir.mkdir()
+        config.download_subdir.mkdir(parents=True)
 
         # Create existing files
-        (config.download_dir / "file1.parquet").write_text("content")
+        (config.download_subdir / "file1.parquet").write_text("content")
 
         result = download_files(config, ["code/file1.parquet"])
 
