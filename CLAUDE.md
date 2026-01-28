@@ -46,7 +46,9 @@ just test-x
 
 This is a Python CLI tool that downloads files from a remote manifest using aria2c.
 
-**Flow:** `main.py` → `config.py` (load settings) → `manifest.py` (fetch JSON) → `downloader.py` (verify & download)
+**Flow:**
+- v1: `main.py` → `config.py` (load settings) → `manifest.py` (fetch JSON) → `downloader.py` (verify & download)
+- v2: `main.py` → `config.py` (load settings) → `manifest_v2.py` (fetch XML listing) → `downloader.py` (checksum verify & download)
 
 | Module | Purpose |
 |--------|---------|
