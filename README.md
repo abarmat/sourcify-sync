@@ -6,6 +6,7 @@ Download files from the Sourcify export manifest using aria2c.
 
 - Python 3.13+
 - [aria2c](https://aria2.github.io/) - high-performance download utility
+- [just](https://github.com/casey/just) - command runner (optional, for development)
 
 ### Installing aria2c
 

@@ -16,7 +16,7 @@ test-cov *args:
 
 # Check Python syntax
 check:
-    uv run python -m py_compile main.py config.py manifest.py downloader.py logging_setup.py
+    uv run python -m py_compile main.py config.py manifest.py manifest_v2.py file_info.py downloader.py logging_setup.py
 
 # Run the application
 run *args:
